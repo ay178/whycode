@@ -1,0 +1,2 @@
+[{"repo": "https://github.com/psf/requests", "path": "src/requests/utils.py", "symbol": "should_bypass_proxies",
+  "expect_any": ["proxy", "no_proxy", "bypass"]}]

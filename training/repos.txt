@@ -1,0 +1,5 @@
+https://github.com/psf/requests
+https://github.com/pallets/flask
+https://github.com/encode/httpx
+https://github.com/pallets/click
+https://github.com/Textualize/rich
