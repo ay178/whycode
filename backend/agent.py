@@ -2,6 +2,7 @@
 import json, os, re, subprocess, urllib.request
 import analyzer as A
 from proof import counterfactual
+import urllib.error
 
 MODEL = os.environ.get("WHYCODE_MODEL", "claude-sonnet-4-6")
 TOOLS = [
