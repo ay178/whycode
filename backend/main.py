@@ -8,10 +8,18 @@ from pydantic import BaseModel
 import analyzer as A, debt as D, guardian as G, pipeline
 
 app = FastAPI(title="WhyCode API")
-app.add_middleware(CORSMiddleware, allow_origins=os.getenv("FRONTEND_ORIGIN", "*").split(","),
-                   allow_methods=["*"], allow_headers=["*"])
+
+ORIGINS = [o.strip().rstrip("/") for o in os.getenv("FRONTEND_ORIGIN", "*").split(",") if o.strip()] or ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ORIGINS,
+    allow_origin_regex=r"https://frontend-three-mauve-.*\.vercel\.app",
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 HITS = defaultdict(list)
-LIMIT, WINDOW = 20, 3600  # requests per IP per hour (protects your API key)
+LIMIT, WINDOW = 20, 3600
 
 
 def limit(req: Request):
