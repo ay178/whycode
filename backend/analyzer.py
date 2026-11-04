@@ -119,7 +119,7 @@ def analyse(repo, path, symbol=None, lines=None, hook=None):
         shutil.rmtree(d, ignore_errors=True)
 
 
-def chat(messages, tools=None, max_tokens=4000, timeout=90):
+def chat(messages, tools=None, max_tokens=4000, timeout=None):
     """OpenAI-compatible chat call (Gemini / Groq / OpenRouter). Env: LLM_API_KEY, LLM_BASE_URL, WHYCODE_MODEL."""
     key = os.environ.get("LLM_API_KEY")
     if not key:
@@ -129,6 +129,10 @@ def chat(messages, tools=None, max_tokens=4000, timeout=90):
             "max_tokens": max_tokens, "messages": messages}
     if tools:
         body["tools"] = tools
+    effort = os.environ.get("LLM_REASONING", "low")  # low/minimal/none/medium/high; "" to disable the field
+    if effort:
+        body["reasoning_effort"] = effort
+    timeout = timeout or int(os.environ.get("LLM_TIMEOUT", "170"))
     req = urllib.request.Request(base + "/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Authorization": f"Bearer {key}", "content-type": "application/json"})
     try:
