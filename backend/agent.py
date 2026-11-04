@@ -2,9 +2,7 @@
 import json, os, re, subprocess, urllib.request
 import analyzer as A
 from proof import counterfactual
-import urllib.error
 
-MODEL = os.environ.get("WHYCODE_MODEL", "claude-sonnet-4-6")
 TOOLS = [
     {"name": "search_evidence", "description": "Hybrid-search commits and comments of this repo for text relevant to a question.",
      "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
@@ -16,22 +14,8 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {}}},
 ]
 
-
-def _call(messages, tools=True):
-    key = os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        raise A.UserError("Server is missing ANTHROPIC_API_KEY")
-    body = {"model": MODEL, "max_tokens": 1500, "messages": messages,
-            "system": [{"type": "text", "text": A.SYSTEM, "cache_control": {"type": "ephemeral"}}]}  # prompt caching
-    if tools:
-        body["tools"] = TOOLS
-    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=json.dumps(body).encode(),
-                                 headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=90) as r:
-            return json.load(r)
-    except Exception as ex:
-        raise A.UserError(f"AI call failed: {ex}")
+TOOLS = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
+                                           "parameters": t["input_schema"]}} for t in TOOLS]
 
 
 def _git(d, *a):
@@ -57,24 +41,27 @@ def _tool(name, inp, d, res, ret):
 
 def run(d, res, ret, emit):
     ranked = [f"[{x['kind']} {x['id']}] {x['text'][:200]}" for x in res.get("evidence_ranked", [])]
-    msgs = [{"role": "user", "content":
+    msgs = [{"role": "system", "content": A.SYSTEM},
+            {"role": "user", "content":
              f"Investigate why this code is like this.\nCODE ({res['path']}:{res['range']}):\n{res['code']}\n\n"
              f"COMMITS (newest first):\n{json.dumps(res['commits'], indent=1)}\nCOMMENTS: {res['comments']}\n"
              f"TOP RETRIEVED EVIDENCE:\n" + "\n".join(ranked) + f"\nCHANGE RISK: {res.get('risk')}\n\n"
              "Use tools only if they add evidence (max 4 calls). Then answer.\n" + A.SCHEMA}]
     for _ in range(5):
-        r = _call(msgs)
-        msgs.append({"role": "assistant", "content": r["content"]})
-        uses = [b for b in r["content"] if b["type"] == "tool_use"]
-        if not uses:
-            return A.parse_explanation("".join(b.get("text", "") for b in r["content"] if b["type"] == "text"), res)
-        out = []
-        for b in uses:
-            emit({"type": "tool", "name": b["name"], "input": b["input"]})
-            ans = _tool(b["name"], b["input"], d, res, ret)
+        m = A.chat(msgs, TOOLS)
+        msgs.append(m)
+        calls = m.get("tool_calls") or []
+        if not calls:
+            return A.parse_explanation(m.get("content") or "", res)
+        for c in calls:
+            name = c["function"]["name"]
+            try:
+                inp = json.loads(c["function"].get("arguments") or "{}")
+            except Exception:
+                inp = {}
+            emit({"type": "tool", "name": name, "input": inp})
+            ans = _tool(name, inp, d, res, ret)
             emit({"type": "tool_result", "summary": ans.replace("\n", " ")[:140]})
-            out.append({"type": "tool_result", "tool_use_id": b["id"], "content": ans[:3000]})
-        msgs.append({"role": "user", "content": out})
+            msgs.append({"role": "tool", "tool_call_id": c["id"], "content": ans[:3000]})
     msgs.append({"role": "user", "content": "Give the final JSON now."})
-    r = _call(msgs, tools=False)
-    return A.parse_explanation("".join(b.get("text", "") for b in r["content"] if b["type"] == "text"), res)
+    return A.parse_explanation(A.chat(msgs).get("content") or "", res)

@@ -1,5 +1,5 @@
 """Git-history evidence extraction (no GitHub token needed: partial clone, no checkout)."""
-import ast, json, os, re, shutil, subprocess, tempfile, urllib.request
+import ast, json, os, re, shutil, subprocess, tempfile, urllib.error, urllib.request
 from ml import INTENT
 from collections import Counter
 
@@ -119,20 +119,30 @@ def analyse(repo, path, symbol=None, lines=None, hook=None):
         shutil.rmtree(d, ignore_errors=True)
 
 
-def claude(system, prompt, max_tokens=900):
-    key = os.environ.get("ANTHROPIC_API_KEY")
+def chat(messages, tools=None, max_tokens=4000, timeout=90):
+    """OpenAI-compatible chat call (Gemini / Groq / OpenRouter). Env: LLM_API_KEY, LLM_BASE_URL, WHYCODE_MODEL."""
+    key = os.environ.get("LLM_API_KEY")
     if not key:
-        raise UserError("Server is missing ANTHROPIC_API_KEY")
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=json.dumps({"model": os.environ.get("WHYCODE_MODEL", "claude-sonnet-4-6"), "max_tokens": max_tokens,
-                         "system": system, "messages": [{"role": "user", "content": prompt}]}).encode(),
-        headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+        raise UserError("Server is missing LLM_API_KEY")
+    base = os.environ.get("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai").rstrip("/")
+    body = {"model": os.environ.get("WHYCODE_MODEL", "gemini-2.5-flash"),
+            "max_tokens": max_tokens, "messages": messages}
+    if tools:
+        body["tools"] = tools
+    req = urllib.request.Request(base + "/chat/completions", data=json.dumps(body).encode(),
+                                 headers={"Authorization": f"Bearer {key}", "content-type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            return json.load(r)["content"][0]["text"]
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.load(r)["choices"][0]["message"]
+    except urllib.error.HTTPError as ex:
+        raise UserError(f"AI call failed: HTTP {ex.code}: {ex.read().decode('utf-8', 'ignore')[:300]}")
     except Exception as ex:
         raise UserError(f"AI call failed: {ex}")
+
+
+def claude(system, prompt, max_tokens=4000):  # name kept so callers don't change
+    m = chat([{"role": "system", "content": system}, {"role": "user", "content": prompt}], max_tokens=max_tokens)
+    return m.get("content") or ""
 
 
 SYSTEM = ("You are WhyCode, a code archaeologist. Explain WHY code is written the way it is using ONLY the "
